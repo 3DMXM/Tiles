@@ -20,14 +20,13 @@ jobs:
 
       - name: Build with xmake
         run: |
-          xmake config --mode=release
-          xmake build
+          xmake f -p windows -a x64 -m release -y
 
       - name: Prepare release artifacts
         run: |
           mkdir -p release-artifacts
           # 复制 dlTiles.exe mergeTiles.exe slice.exe 到 release-artifacts 目录
-          cp -r build/windows/release/dlTiles.exe build/windows/release/mergeTiles.exe build/windows/release/slice.exe release-artifacts
+          cp -r build/windows/x64/release/dlTiles.exe build/windows/x64/release/mergeTiles.exe build/windows/x64/release/slice.exe release-artifacts
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
