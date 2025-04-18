@@ -26,7 +26,9 @@ jobs:
         run: |
           mkdir -p release-artifacts
           # 复制 dlTiles.exe mergeTiles.exe slice.exe 到 release-artifacts 目录
-          cp -r build/windows/x64/release/dlTiles.exe build/windows/x64/release/mergeTiles.exe build/windows/x64/release/slice.exe release-artifacts
+          cp -r build/windows/x64/release/dlTiles.exe release-artifacts/dlTiles.exe
+          cp -r build/windows/x64/release/mergeTiles.exe release-artifacts/mergeTiles.exe
+          cp -r build/windows/x64/release/slice.exe release-artifacts/slice.exe
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1

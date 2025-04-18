@@ -8,6 +8,5 @@ target("dlTiles")
     add_files("src/*.cpp") 
     set_languages("cxx20")
     add_packages("inih", "libcurl")
-    add_configfiles("config.ini", {prefixdir = ""})
 
 

@@ -127,48 +127,127 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
 {
     CURL *curl;
     CURLcode res;
-    long responseCode;
+    long responseCode = 0;
+    const int maxRetries = 2; // 最大重试次数
+    int attempts = 0;
 
-    curl = curl_easy_init();
-    if (curl)
+    while (attempts <= maxRetries) // 允许初始尝试 + 重试次数
     {
-        std::ofstream outFile(outputPath, std::ios::binary);
-        if (!outFile.is_open())
+        attempts++;
+
+        curl = curl_easy_init();
+        if (curl)
         {
-            std::cerr << "Unable to open file: " << outputPath << std::endl; // 无法打开文件
+            // 设置请求参数
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            // 设置User-Agent
+            curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0");
+            // 设置HTTP代理（如果有提供）
+            if (!proxy.empty())
+            {
+                curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+            }
+
+            // 先不保存响应内容，只检查状态码
+            curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+
+            // 执行请求
+            res = curl_easy_perform(curl);
+            if (res != CURLE_OK)
+            {
+                std::cerr << "Connection failed: " << curl_easy_strerror(res) << std::endl;
+                curl_easy_cleanup(curl);
+
+                if (attempts <= maxRetries)
+                {
+                    std::cout << "Retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                    continue; // 尝试重试
+                }
+                return false;
+            }
+
+            // 获取响应状态码
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+
+            // 只有状态码为 200 时才下载内容
+            if (responseCode == 200)
+            {
+                // 重置 CURL 选项，准备下载内容
+                curl_easy_reset(curl);
+
+                std::ofstream outFile(outputPath, std::ios::binary);
+                if (!outFile.is_open())
+                {
+                    std::cerr << "Unable to open file: " << outputPath << std::endl; // 无法打开文件
+                    curl_easy_cleanup(curl);
+                    return false;
+                }
+
+                // 重新设置请求参数
+                curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
+                curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+                // 设置User-Agent
+                curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0");
+                if (!proxy.empty())
+                {
+                    curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+                }
+                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+                curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outFile);
+
+                // 执行下载
+                res = curl_easy_perform(curl);
+                outFile.close();
+
+                if (res != CURLE_OK)
+                {
+                    std::cerr << "Download failed: " << curl_easy_strerror(res) << std::endl;
+                    curl_easy_cleanup(curl);
+
+                    if (attempts <= maxRetries)
+                    {
+                        std::cout << "Retrying download... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                        continue; // 尝试重试
+                    }
+                    return false;
+                }
+
+                printf("Downloaded tile: %s, response code: %ld\n", url.c_str(), responseCode);
+                curl_easy_cleanup(curl);
+                return true; // 下载成功，退出循环
+            }
+            else
+            {
+                printf("Skipped tile: %s, response code: %ld\n", url.c_str(), responseCode);
+                curl_easy_cleanup(curl);
+
+                if (attempts <= maxRetries && (responseCode >= 500 || responseCode == 429))
+                {
+                    // 只有在服务器错误(5xx)或请求过多(429)时重试
+                    std::cout << "Server error, retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                    // 对于429错误可考虑增加延时
+                    if (responseCode == 429)
+                    {
+                        std::this_thread::sleep_for(std::chrono::seconds(2 * attempts)); // 指数退避
+                    }
+                    continue;
+                }
+                return false;
+            }
+        }
+        else
+        {
+            if (attempts <= maxRetries)
+            {
+                std::cout << "Failed to initialize curl, retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                continue; // 尝试重试
+            }
             return false;
         }
-
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        // 设置HTTP代理（如果有提供）
-        if (!proxy.empty())
-        {
-            curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
-        }
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outFile);
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK)
-        {
-            std::cerr << "Download failed: " << curl_easy_strerror(res) << std::endl; // 下载失败
-            curl_easy_cleanup(curl);
-            return false;
-        }
-
-        printf("Downloaded tile: %s, response code: %ld\n", url.c_str(), responseCode);
-
-        curl_easy_cleanup(curl);
-        outFile.close();
-    }
-    else
-    {
-        curl_easy_cleanup(curl);
     }
 
-    return true;
+    return false; // 如果所有尝试都失败
 }
 
 // 工作线程函数

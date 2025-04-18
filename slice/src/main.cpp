@@ -36,25 +36,38 @@ void sliceImage(const std::string &imagePath, int tileSize, const std::string &o
     int originalWidth = image.cols;
     int originalHeight = image.rows;
 
-    // 计算最大缩放级别
-    int maxZoomLevel = static_cast<int>(std::log2(std::min(originalWidth, originalHeight) / tileSize)) + 1;
+    // 计算最大缩放级别（基于最长边）
+    int maxDimension = std::max(originalWidth, originalHeight);
+    int maxZoomLevel = static_cast<int>(std::log2(maxDimension / tileSize)) + 1;
 
     printf("Image size: %dx%d\n, max zoom level: %d\n", originalWidth, originalHeight, maxZoomLevel);
 
+    // 保持原始宽高比
+    float aspectRatio = static_cast<float>(originalWidth) / originalHeight;
+
     for (int z = 0; z <= maxZoomLevel; ++z)
     {
-        // int numTiles = std::pow(2, z);
-        // int tileWidth = originalWidth / numTiles;
-        // int tileHeight = originalHeight / numTiles;
+        // 计算当前级别的基础分辨率
+        int baseSize = baseResolution * std::pow(2, z);
 
-        // 计算当前级别图片的目标分辨率
-        int targetResolution = baseResolution * std::pow(2, z);
-        // std::cout << "Zoom level " << z << ": 目标分辨率为 " << targetResolution << "x" << targetResolution << "." << std::endl;
-        printf("Zoom level: %d, targetResolution: %dx%d\n", z, targetResolution, targetResolution);
+        // 根据宽高比计算目标宽度和高度
+        int targetWidth, targetHeight;
+        if (originalWidth >= originalHeight)
+        {
+            targetWidth = baseSize;
+            targetHeight = static_cast<int>(baseSize / aspectRatio);
+        }
+        else
+        {
+            targetHeight = baseSize;
+            targetWidth = static_cast<int>(baseSize * aspectRatio);
+        }
 
-        // 调整图片大小到当前级别的分辨率
+        printf("Zoom level: %d, targetResolution: %dx%d\n", z, targetWidth, targetHeight);
+
+        // 调整图片大小到当前级别的分辨率，保持宽高比
         cv::Mat zoomedImg;
-        cv::resize(image, zoomedImg, cv::Size(targetResolution, targetResolution), 0, 0, cv::INTER_LANCZOS4);
+        cv::resize(image, zoomedImg, cv::Size(targetWidth, targetHeight), 0, 0, cv::INTER_LANCZOS4);
         int zoomWidth = zoomedImg.cols;
         int zoomHeight = zoomedImg.rows;
 
@@ -64,15 +77,10 @@ void sliceImage(const std::string &imagePath, int tileSize, const std::string &o
 
         // 切割当前缩放级别的图片
         int tileCount = 0;
-        for (int y = 0; y < numTilesX; ++y)
+        for (int y = 0; y < numTilesY; ++y) // 修正：y 应该循环 numTilesY 次
         {
-            for (int x = 0; x < numTilesY; ++x)
+            for (int x = 0; x < numTilesX; ++x) // 修正：x 应该循环 numTilesX 次
             {
-                // int xStart = x * tileWidth;
-                // int yStart = y * tileHeight;
-                // int xEnd = std::min(xStart + tileWidth, originalWidth);
-                // int yEnd = std::min(yStart + tileHeight, originalHeight);
-
                 // 确定瓦片的左上角和右下角位置
                 int left = x * tileSize;
                 int top = y * tileSize;
@@ -83,12 +91,20 @@ void sliceImage(const std::string &imagePath, int tileSize, const std::string &o
                 cv::Rect tileRect(left, top, right - left, bottom - top);
                 cv::Mat tile = zoomedImg(tileRect);
 
+                // 确保瓦片是固定大小，不足的部分用黑色填充
+                if (tile.cols != tileSize || tile.rows != tileSize)
+                {
+                    cv::Mat paddedTile = cv::Mat::zeros(tileSize, tileSize, tile.type());
+                    cv::Rect roi(0, 0, tile.cols, tile.rows);
+                    tile.copyTo(paddedTile(roi));
+                    tile = paddedTile;
+                }
+
                 saveTile(tile, z, x, y, outputDir);
                 tileCount++;
             }
         }
-        //  std::cout << "Zoom level " << z << ": 切割为 " << tileCount << " 张瓦片，图片分辨率为 " << targetResolution << "x" << targetResolution << "." << std::endl;
-        printf("Zoom level: %d, tile have a  %d, The image resolution is %dx%d\n", z, tileCount, targetResolution, targetResolution);
+        printf("Zoom level: %d, tiles: %d, Image resolution: %dx%d\n", z, tileCount, targetWidth, targetHeight);
     }
 }
 
