@@ -82,7 +82,7 @@ cv::Mat mergeTiles(const std::vector<TileInfo> &tiles, int tileSize = 256)
 {
     if (tiles.empty())
     {
-        std::cerr << "No tiles found" << std::endl;
+        printf("No tiles found\n");
         return cv::Mat();
     }
 
@@ -92,7 +92,7 @@ cv::Mat mergeTiles(const std::vector<TileInfo> &tiles, int tileSize = 256)
     {
         if (tile.z != zoomLevel)
         {
-            std::cerr << "Warning: Tiles have inconsistent zoom levels, merge results may be abnormal" << std::endl;
+            printf("Warning: Tiles have inconsistent zoom levels, merge results may be abnormal\n");
             break;
         }
     }
@@ -108,8 +108,8 @@ cv::Mat mergeTiles(const std::vector<TileInfo> &tiles, int tileSize = 256)
     int width = (maxX - minX + 1) * tileSize;
     int height = (maxY - minY + 1) * tileSize;
 
-    std::cout << "Merged image size: " << width << "x" << height << " pixels" << std::endl;
-    std::cout << "Tile range: X(" << minX << "-" << maxX << "), Y(" << minY << "-" << maxY << ")" << std::endl;
+    printf("Merged image size: %dx%d pixels\n", width, height);
+    printf("Tile range: X(%d-%d), Y(%d-%d)\n", minX, maxX, minY, maxY);
 
     // 创建合并后的图像
     cv::Mat result(height, width, CV_8UC3, cv::Scalar(255, 255, 255));
@@ -121,7 +121,7 @@ cv::Mat mergeTiles(const std::vector<TileInfo> &tiles, int tileSize = 256)
 
         if (tileImg.empty())
         {
-            std::cerr << "Cannot read tile: " << tile.path << std::endl;
+            printf("Cannot read tile: %s\n", tile.path.c_str());
             continue;
         }
 
@@ -149,23 +149,23 @@ int main(int argc, char *argv[])
 {
     if (argc < 2)
     {
-        std::cout << "Usage: " << argv[0] << " <tile directory> [output filename]" << std::endl;
+        printf("Usage: %s <tile directory> [output filename]\n", argv[0]);
         return 1;
     }
 
     std::string tileDirectory = argv[1];
     std::string outputFile = (argc > 2) ? argv[2] : "merged_tiles.jpg";
 
-    std::cout << "Scanning tile directory: " << tileDirectory << std::endl;
+    printf("Scanning tile directory: %s\n", tileDirectory.c_str());
 
     // 扫描目录获取瓦片信息
     std::vector<TileInfo> tiles = scanTiles(tileDirectory);
 
-    std::cout << "Found " << tiles.size() << " tile files" << std::endl;
+    printf("Found %zu tile files\n", tiles.size());
 
     if (tiles.empty())
     {
-        std::cerr << "No tile files found, please check directory path" << std::endl;
+        printf("No tile files found, please check directory path\n");
         return 1;
     }
 
@@ -174,18 +174,18 @@ int main(int argc, char *argv[])
 
     if (mergedImage.empty())
     {
-        std::cerr << "Failed to merge tiles" << std::endl;
+        printf("Failed to merge tiles\n");
         return 1;
     }
 
     // 保存合并后的图像
-    std::cout << "Saving merged image to: " << outputFile << std::endl;
+    printf("Saving merged image to: %s\n", outputFile.c_str());
     cv::imwrite(outputFile, mergedImage);
 
-    std::cout << "Tile merge complete!" << std::endl;
+    printf("Tile merge complete!\n");
 
     // 按任意键继续
-    std::cout << "Press any key to exit..." << std::endl;
+    printf("Press any key to exit...\n");
     std::cin.get();
 
     return 0;

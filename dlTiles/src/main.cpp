@@ -122,6 +122,12 @@ public:
     }
 };
 
+// 检查文件是否存在
+bool fileExists(const std::string &filePath)
+{
+    return fs::exists(filePath);
+}
+
 // 下载单个瓦片
 bool downloadTile(const std::string &url, const std::string &outputPath, const std::string &proxy = "")
 {
@@ -156,12 +162,12 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
             res = curl_easy_perform(curl);
             if (res != CURLE_OK)
             {
-                std::cerr << "Connection failed: " << curl_easy_strerror(res) << std::endl;
+                fprintf(stderr, "Connection failed: %s\n", curl_easy_strerror(res));
                 curl_easy_cleanup(curl);
 
                 if (attempts <= maxRetries)
                 {
-                    std::cout << "Retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                    printf("Retrying... Attempt %d of %d\n", attempts, (maxRetries + 1));
                     continue; // 尝试重试
                 }
                 return false;
@@ -179,7 +185,7 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
                 std::ofstream outFile(outputPath, std::ios::binary);
                 if (!outFile.is_open())
                 {
-                    std::cerr << "Unable to open file: " << outputPath << std::endl; // 无法打开文件
+                    fprintf(stderr, "Unable to open file: %s\n", outputPath.c_str()); // 无法打开文件
                     curl_easy_cleanup(curl);
                     return false;
                 }
@@ -202,12 +208,12 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
 
                 if (res != CURLE_OK)
                 {
-                    std::cerr << "Download failed: " << curl_easy_strerror(res) << std::endl;
+                    fprintf(stderr, "Download failed: %s\n", curl_easy_strerror(res));
                     curl_easy_cleanup(curl);
 
                     if (attempts <= maxRetries)
                     {
-                        std::cout << "Retrying download... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                        printf("Retrying download... Attempt %d of %d\n", attempts, (maxRetries + 1));
                         continue; // 尝试重试
                     }
                     return false;
@@ -225,7 +231,7 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
                 if (attempts <= maxRetries && (responseCode >= 500 || responseCode == 429))
                 {
                     // 只有在服务器错误(5xx)或请求过多(429)时重试
-                    std::cout << "Server error, retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                    printf("Server error, retrying... Attempt %d of %d\n", attempts, (maxRetries + 1));
                     // 对于429错误可考虑增加延时
                     if (responseCode == 429)
                     {
@@ -240,7 +246,7 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
         {
             if (attempts <= maxRetries)
             {
-                std::cout << "Failed to initialize curl, retrying... Attempt " << attempts << " of " << (maxRetries + 1) << std::endl;
+                printf("Failed to initialize curl, retrying... Attempt %d of %d\n", attempts, (maxRetries + 1));
                 continue; // 尝试重试
             }
             return false;
@@ -251,11 +257,20 @@ bool downloadTile(const std::string &url, const std::string &outputPath, const s
 }
 
 // 工作线程函数
-void workerThread(TaskQueue *taskQueue, std::atomic<int> *completedCount, std::atomic<int> *failedCount)
+void workerThread(TaskQueue *taskQueue, std::atomic<int> *completedCount, std::atomic<int> *failedCount, std::atomic<int> *skippedCount)
 {
     DownloadTask task;
     while (taskQueue->getTask(task))
     {
+        // 先检查文件是否已存在
+        if (fileExists(task.outputPath))
+        {
+            printf("File already exists: %s\n", task.outputPath.c_str());
+            (*skippedCount)++;
+            continue;
+        }
+
+        // 文件不存在，才执行下载
         if (downloadTile(task.url, task.outputPath, task.proxy))
         {
             (*completedCount)++;
@@ -263,7 +278,7 @@ void workerThread(TaskQueue *taskQueue, std::atomic<int> *completedCount, std::a
         else
         {
             (*failedCount)++;
-            std::cerr << "Failed to download tile: " << task.url << std::endl;
+            fprintf(stderr, "Failed to download tile: %s\n", task.url.c_str());
         }
     }
 }
@@ -281,6 +296,7 @@ void downloadTiles(const std::string &baseUrl, const std::string &outputDir,
     // 计数器
     std::atomic<int> completedCount(0);
     std::atomic<int> failedCount(0);
+    std::atomic<int> skippedCount(0); // 新增已存在文件计数器
     int totalTiles = (maxX - minX + 1) * (maxY - minY + 1);
 
     // 添加所有下载任务到队列
@@ -303,18 +319,19 @@ void downloadTiles(const std::string &baseUrl, const std::string &outputDir,
     std::vector<std::thread> threads;
     for (int i = 0; i < threadCount; ++i)
     {
-        threads.push_back(std::thread(workerThread, &taskQueue, &completedCount, &failedCount));
+        threads.push_back(std::thread(workerThread, &taskQueue, &completedCount, &failedCount, &skippedCount));
     }
 
     // 进度显示
     int lastPercent = 0;
-    while (completedCount + failedCount < totalTiles)
+    while (completedCount + failedCount + skippedCount < totalTiles)
     {
-        int percent = (completedCount + failedCount) * 100 / totalTiles;
+        int percent = (completedCount + failedCount + skippedCount) * 100 / totalTiles;
         if (percent > lastPercent)
         {
-            std::cout << "\rProgress: " << percent << "% (" << completedCount << " completed, "
-                      << failedCount << " failed)" << std::flush;
+            printf("\rProgress: %d%% (%d completed, %d failed, %d skipped)",
+                   percent, completedCount.load(), failedCount.load(), skippedCount.load());
+            fflush(stdout); // 替代 std::flush
             lastPercent = percent;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -329,8 +346,8 @@ void downloadTiles(const std::string &baseUrl, const std::string &outputDir,
         thread.join();
     }
 
-    std::cout << "\rProgress: 100% (" << completedCount << " completed, "
-              << failedCount << " failed)" << std::endl;
+    printf("\rProgress: 100%% (%d completed, %d failed, %d skipped)\n",
+           completedCount.load(), failedCount.load(), skippedCount.load());
 }
 
 int main()
@@ -353,7 +370,7 @@ int main()
         config.proxy,
         config.threadCount);
 
-    std::cout << "Download completed!" << std::endl;
+    printf("Download completed!\n");
 
     // 清理 curl
     curl_global_cleanup();

@@ -9,9 +9,13 @@ int quality = 90;
 
 void saveTile(const cv::Mat &tile, int z, int x, int y, const std::string &outputDir)
 {
+    // 创建目录结构 z/x
+    std::string zDir = outputDir + "/" + std::to_string(z);
+    std::string xDir = zDir + "/" + std::to_string(x);
+    std::filesystem::create_directories(xDir);
 
-    std::filesystem::create_directories(outputDir + "/" + std::to_string(z));
-    std::string fileName = outputDir + "/" + std::to_string(z) + "/tile_" + std::to_string(x) + "_" + std::to_string(y) + ".webp";
+    // Mapbox 格式的文件名: z/x/y.webp
+    std::string fileName = xDir + "/" + std::to_string(y) + ".webp";
 
     printf("Saving tile in: %s\n", fileName.c_str());
 
@@ -23,8 +27,6 @@ void saveTile(const cv::Mat &tile, int z, int x, int y, const std::string &outpu
 
 void sliceImage(const std::string &imagePath, int tileSize, const std::string &outputDir)
 {
-    int baseResolution = tileSize;
-
     cv::Mat image = cv::imread(imagePath);
 
     if (image.empty())
@@ -36,62 +38,75 @@ void sliceImage(const std::string &imagePath, int tileSize, const std::string &o
     int originalWidth = image.cols;
     int originalHeight = image.rows;
 
-    // 计算最大缩放级别（基于最长边）
+    // 计算最大缩放级别，Mapbox 通常从 0 级开始
     int maxDimension = std::max(originalWidth, originalHeight);
-    int maxZoomLevel = static_cast<int>(std::log2(maxDimension / tileSize)) + 1;
+    int maxZoomLevel = static_cast<int>(std::ceil(std::log2(maxDimension / tileSize)));
 
-    printf("Image size: %dx%d\n, max zoom level: %d\n", originalWidth, originalHeight, maxZoomLevel);
+    // 计算 0 级的尺寸，即整个世界在一个瓦片中的尺寸
+    int baseSize = tileSize;
+
+    printf("Image size: %dx%d, max zoom level: %d\n", originalWidth, originalHeight, maxZoomLevel);
 
     // 保持原始宽高比
     float aspectRatio = static_cast<float>(originalWidth) / originalHeight;
 
     for (int z = 0; z <= maxZoomLevel; ++z)
     {
-        // 计算当前级别的基础分辨率
-        int baseSize = baseResolution * std::pow(2, z);
+        // 计算当前级别的世界大小（按照 2^z 缩放）
+        int worldSizeInTiles = 1 << z; // 2^z
+        int worldSizeInPixels = worldSizeInTiles * tileSize;
 
-        // 根据宽高比计算目标宽度和高度
+        // 根据宽高比确定目标图像在世界坐标系中的尺寸
         int targetWidth, targetHeight;
-        if (originalWidth >= originalHeight)
+        if (aspectRatio >= 1.0)
         {
-            targetWidth = baseSize;
-            targetHeight = static_cast<int>(baseSize / aspectRatio);
+            // 宽图
+            targetWidth = worldSizeInPixels;
+            targetHeight = static_cast<int>(worldSizeInPixels / aspectRatio);
         }
         else
         {
-            targetHeight = baseSize;
-            targetWidth = static_cast<int>(baseSize * aspectRatio);
+            // 高图
+            targetHeight = worldSizeInPixels;
+            targetWidth = static_cast<int>(worldSizeInPixels * aspectRatio);
         }
 
-        printf("Zoom level: %d, targetResolution: %dx%d\n", z, targetWidth, targetHeight);
+        printf("Zoom level: %d, worldSize: %d tiles (%d pixels), targetResolution: %dx%d\n",
+               z, worldSizeInTiles, worldSizeInPixels, targetWidth, targetHeight);
 
-        // 调整图片大小到当前级别的分辨率，保持宽高比
+        // 调整图片大小
         cv::Mat zoomedImg;
         cv::resize(image, zoomedImg, cv::Size(targetWidth, targetHeight), 0, 0, cv::INTER_LANCZOS4);
-        int zoomWidth = zoomedImg.cols;
-        int zoomHeight = zoomedImg.rows;
 
-        // 计算瓦片数量
-        int numTilesX = (zoomWidth + tileSize - 1) / tileSize; // 向上取整
-        int numTilesY = (zoomHeight + tileSize - 1) / tileSize;
+        // 计算需要的瓦片数
+        int numTilesX = (targetWidth + tileSize - 1) / tileSize;
+        int numTilesY = (targetHeight + tileSize - 1) / tileSize;
 
-        // 切割当前缩放级别的图片
+        // 确保不超过世界大小
+        numTilesX = std::min(numTilesX, worldSizeInTiles);
+        numTilesY = std::min(numTilesY, worldSizeInTiles);
+
+        // 计算居中偏移量，使图像在世界坐标系中居中
+        int offsetX = (worldSizeInTiles - numTilesX) / 2;
+        int offsetY = (worldSizeInTiles - numTilesY) / 2;
+
+        // 切割图片生成瓦片
         int tileCount = 0;
-        for (int y = 0; y < numTilesY; ++y) // 修正：y 应该循环 numTilesY 次
+        for (int y = 0; y < numTilesY; ++y)
         {
-            for (int x = 0; x < numTilesX; ++x) // 修正：x 应该循环 numTilesX 次
+            for (int x = 0; x < numTilesX; ++x)
             {
-                // 确定瓦片的左上角和右下角位置
+                // 确定瓦片区域
                 int left = x * tileSize;
                 int top = y * tileSize;
-                int right = std::min(left + tileSize, zoomWidth);
-                int bottom = std::min(top + tileSize, zoomHeight);
+                int right = std::min(left + tileSize, targetWidth);
+                int bottom = std::min(top + tileSize, targetHeight);
 
                 // 裁剪瓦片
                 cv::Rect tileRect(left, top, right - left, bottom - top);
                 cv::Mat tile = zoomedImg(tileRect);
 
-                // 确保瓦片是固定大小，不足的部分用黑色填充
+                // 补充至标准大小
                 if (tile.cols != tileSize || tile.rows != tileSize)
                 {
                     cv::Mat paddedTile = cv::Mat::zeros(tileSize, tileSize, tile.type());
@@ -100,11 +115,12 @@ void sliceImage(const std::string &imagePath, int tileSize, const std::string &o
                     tile = paddedTile;
                 }
 
-                saveTile(tile, z, x, y, outputDir);
+                // 保存瓦片，注意转换为 Mapbox 坐标系（加上偏移量）
+                saveTile(tile, z, x + offsetX, y + offsetY, outputDir);
                 tileCount++;
             }
         }
-        printf("Zoom level: %d, tiles: %d, Image resolution: %dx%d\n", z, tileCount, targetWidth, targetHeight);
+        printf("Zoom level: %d, generated %d tiles\n", z, tileCount);
     }
 }
 
@@ -137,7 +153,7 @@ int main(int argc, char **argv)
     sliceImage(imagePath, tileSize, outputDir);
 
     // 按任意键继续
-    std::cout << "Press any key to continue..." << std::endl;
+    printf("Press any key to continue...\n");
     std::cin.get();
 
     return 0;
