@@ -1,39 +1,40 @@
 name: Release Build
 
 on:
-  release:
-    types: [created]
+    release:
+        types: [created]
 
 jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+    build:
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
 
-      - name: Setup xmake
-        uses: xmake-io/github-action-setup-xmake@v1
-        with:
-          xmake-version: latest
+            - name: Setup xmake
+              uses: xmake-io/github-action-setup-xmake@v1
+              with:
+                  xmake-version: latest
 
-      - name: Build with xmake
-        run: |
-          xmake f -p windows -a x64 -m release -y
+            - name: Build with xmake
+              run: |
+                  xmake f -p windows -a x64 -m release -y
+                  xmake
 
-      - name: Prepare release artifacts
-        run: |
-          mkdir -p release-artifacts
-          # 复制 dlTiles.exe mergeTiles.exe slice.exe 到 release-artifacts 目录
-          cp -r build/windows/x64/release/dlTiles.exe release-artifacts/dlTiles.exe
-          cp -r build/windows/x64/release/mergeTiles.exe release-artifacts/mergeTiles.exe
-          cp -r build/windows/x64/release/slice.exe release-artifacts/slice.exe
+            - name: Prepare release artifacts
+              run: |
+                  New-Item -ItemType Directory -Force -Path release-artifacts
+                  # 复制 dlTiles.exe mergeTiles.exe slice.exe 到 release-artifacts 目录
+                  Copy-Item build/windows/x64/release/dlTiles.exe release-artifacts/dlTiles.exe
+                  Copy-Item build/windows/x64/release/mergeTiles.exe release-artifacts/mergeTiles.exe
+                  Copy-Item build/windows/x64/release/slice.exe release-artifacts/slice.exe
 
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            release-artifacts/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - name: Upload Release Assets
+              uses: softprops/action-gh-release@v1
+              with:
+                  files: |
+                      release-artifacts/*
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
